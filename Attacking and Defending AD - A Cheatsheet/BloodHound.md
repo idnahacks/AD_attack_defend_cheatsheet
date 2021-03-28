@@ -48,7 +48,7 @@ https://bloodhound.readthedocs.io/en/latest/installation/windows.html
 
 ## BloodHound Ingestors
 On the victim machine run one of the following to get the Ingestors to enumerate the domain and store the information in a format that BloodHound can use:
-*Note that the creds are optional if you want to run as the current user. There are also other options below if you want to change shell to one that is a domain user. This is also optional.*
+*Note that the creds are optional if you want to run as the current user. There are also other options below if you want to change shell to one that is a different user.*
 - Using exe ingestor
 `.\SharpHound.exe --CollectionMethod All --LDAPUser <UserName> --LDAPPass <Password> --JSONFolder <PathToFile>`
  - Using PowerShell ingestor
