@@ -27,7 +27,7 @@ PowerView makes things a little more easy, but can be picked up by AMSI and ther
  - Get information about a different domain
 `Get-ADDomain -Identity <Domain>`
  - Get Domain SID
-`Get-DomainSID`
+`(Get-ADDomain).DomainSID`
  - Get Domain Controllers
 `Get-ADDomainController`
  - Get Domain Controllers from a different domain
@@ -181,21 +181,6 @@ Get-NetGPO -ADSpath '$adspath'
 ### AD Module 
  - Review Local AppLocker Effective Policy
 `Get-AppLockerPolicy -Effective | select -ExpandProperty RuleCollections`
-
-## User Hunting
-### Powerview (will need to bypass AMSI)
- - Find all machines in the current domain where the current user has local admin access
-`Find-LocalAdminAccess -Verbose`
- - Find local admins on all machines of the domain:
-`Invoke-EnumerateLocalAdmin -Verbose`
- - Find computers were a Domain Admin OR a specified user has a session
-```
-Invoke-UserHunter
-Invoke-UserHunter -GroupName "RDPUsers"
-Invoke-UserHunter -Stealth
-```
- - Confirm admin access
-`Invoke-UserHunter -CheckAccess`
 
 ## BloodHound Ingestors
  - Using exe ingestor

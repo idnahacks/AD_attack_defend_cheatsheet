@@ -54,7 +54,7 @@ On the victim machine run one of the following to get the Ingestors to enumerate
  - Using PowerShell ingestor
 ```
 . .\SharpHound.ps1
-Invoke-BloodHound -CollectionMethod All  -LDAPUser <UserName> -LDAPPass <Password> -OutputDirectory <PathToFile>
+Invoke-BloodHound -CollectionMethod All  -LDAPUser <UserName> -LDAPPass <Password> -OutputDirectory <PathToFile> -Domain <Domain to enumerate>
 ```
  - Take the output and transfer it to your attacker machine and import it into BloodHound and watch it go.
 
