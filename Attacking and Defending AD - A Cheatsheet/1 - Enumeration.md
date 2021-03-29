@@ -16,9 +16,9 @@ PowerView makes things a little more easy, but can be picked up by AMSI and ther
 `Get-NetDomainController -Domain <DomainName>`
  - Get Domain Policies
  `Get-DomainPolicy`
-  - Get Password policy
+  - Get Password policy (useful for not locking accounts in a brute force or password spray scenario)
  `(Get-DomainPolicy)."system access"`
-  - Get Kerberos policy
+  - Get Kerberos policy (useful for things like Golden Ticket attacks)
  `(Get-DomainPolicy)."kerberos policy"`
  
  ### AD Module
@@ -33,21 +33,26 @@ PowerView makes things a little more easy, but can be picked up by AMSI and ther
  - Get Domain Controllers from a different domain
 `Get-ADDomainController -Identity <DomainName>`
 
-## Review all users
+## User Enumeration
 ### Powerview (will need to bypass AMSI)
 
  - Show all users
  `Get-NetUser`
   - Show a particular user
  `Get-NetUser -SamAccountName <user>`
+ `Get-NetUser -Username <user>`
  `Get-NetUser | select cn`
+  - Get a list of all properties for users
  `Get-Userproperty`
  - Show the samaccountname field from all users from a specified domain
 `Get-netuser -domain <domainName> | select -expandproperty samaccountname`
  - Show last password change
 `Get-UserProperty -Properties pwdlastset`
+ - Show logon count of a user (handy for detecting decoy or stale accounts)
+`Get-UserProperty -Properties logoncount`
  - Search for a string in a user's attribute
-`Find-UserField -SearchField Description -SearchTerm "wtver"`
+`Find-UserField -SearchField Description -SearchTerm "pass"`
+`Find-UserField -SearchField Description -SearchTerm "built"`
  - Find users with sessions on a machine
 `Get-NetLoggedon -ComputerName <ComputerName>`
  - Enumerate sessions on a machine
@@ -59,64 +64,107 @@ PowerView makes things a little more easy, but can be picked up by AMSI and ther
  - Show a user's properties
 `Get-ADUser -Filter * -Identity <user> -Properties *`
  - Search for a string in a user's attribute
-`Get-ADUser -Filter 'Description -like "*wtver*"' -Properties Description | select Name, Description`
+`Get-ADUser -Filter 'Description -like "*pass*"' -Properties Description | select Name,Description`
+`Get-ADUser -Filter 'Description -ne $null' -Properties Description | select Name,Description`
+ - Get a list of all properties for users
+`Get-ADUser -Filter * -Properties * | select -First 1 | Get-Member -MemberType *Property | select Name`
+ - Show the last password set date for users
+`Get-ADUser -Filter * -Properties * | select name,@{expression={[datetime]::fromFileTime($_.pwdlastset)}}`
 
-## Review all computers
+## Computer Enumeration
 ### Powerview (will need to bypass AMSI)
-`get-netcomputer -domain <domainName>`
+ - List all computer objects in the domain
+`Get-NetComputer -Domain <domainName>`
+ - Show all properties of computer objects in the domain
 `Get-NetComputer -FullData`
-`Get-DomainGroup`
-
  - Enumerate live machines
 `Get-Netcomputer -Ping`
+ - Look for stale computer objects
+`Get-NetComputer -FullData | select dnshostname,lastlogon`
+ - Get actively logged on users on a computer (needs local admin rights on the target)
+`Get_NetLoggedOn -ComputerName <computername>`
+ - Get locally logged on users on a computer (needs remote registry on the target - this is enabled by default on Server OSes)
+`Get-LoggedonLocal -ComputerName <computername>`
+ - Get the last logged on user on a computer (needs admin rights and remote registry on the target)
+`Get-LastLoggedOn -Computername <computername>`
 
 ### AD Module
+ - List all computer objects in the domain
+`Get-ADComputer -Filter * | select name`
+ - Show all properties of computer objects in the domain
 `Get-ADComputer -Filter * -Properties *`
+ - List all Server 2016 computer objects
+`Get-ADComputer -Filter 'OperatingSystem -like "*Server 2016*"' -Properties OperatingSystem | select Name,OperatingSystem`
+ - Enumerate live machines
+`Get-ADComputer -Filter * -Properties DNSHostName | %{Test-Connection -Count 1 -ComputerName $_.DNSHostName}`
 
-## Groups
+## Enumerating Groups
 ### Powerview (will need to bypass AMSI)
- - Get group members
-`Get-NetGroupMember -GroupName "<GroupName>" -Domain <DomainName>`
+#### Domain Groups
+  - Get all groups in the current domain
+`Get-NetGroup`
+`Get-DomainGroup`
+`Get-NetGroup -Domain <targetdomain>`
+ - List all groups with admin in the name
+`Get-NetGroup *admin*`
+`Get-DomainGroup *admin* | select distinguishedname`
+ - Get attributes of a group
+`Get-NetGroup -GroupName <GroupName> -FullData` 
+ - Get group members (**recurse** includes nested group membership)
+`Get-NetGroupMember -GroupName "<GroupName>" -Recurse -Domain <DomainName>`
 _Built-In Groups are good to check for membership e.g. Remote Desktop Users, Server Operators, Print Operators etc_
 
- - Get attributes of a group
-`Get-NetGroup -GroupName <GroupName> -FullData`
-
  - Domain Admins (members and properties)
-`get-netgroupmember -groupname "Domain Admins" -recurse | select -expandproperty membername`
+`Get-NetGroupMember -GroupName "Domain Admins" -Recurse | select -expandproperty membername`
 
-`Get-DomainGroup -Identity <GroupName> | Select-Object -ExpandProperty Member`
-
-Enterprise Admins (members and properties)
- - First establish the forest domain name
+ - Enterprise Admins (members and properties)
+	 - First establish the forest domain name, then query the Enterprise ADmins
 `get-netforestdomain -verbose`
-
- - Then query the Enterprise Admins
 `get-netgroupmember -groupname "Enterprise Admins" -domain <forestdomain> -recurse | select -expandproperty membername`
+ 
+ - Get group membership for a user
+`Get-NetGroup -Username "<username>"`
+#### Local Machine Groups
+ - Get local groups on a machine (needs local admin privs)
+`Get-NetLocalGroup -ComputerName <computername> -ListGroups`
+ - Get members of local groups on a machine (needs local admin privs)
+`Get-NetLocalGroup -ComputerName <computername> -Recurse`
 
 ### AD Module
-`Get-ADGroup -Filter * `
-
-## Shares
+ - Get all groups in the current domains
+`Get-ADGroup -Filter * | select Name`
+`Get-ADGroup -Filter * -Properties *`
+ - List all groups with admin in the name
+`Get-ADGroup -Filter 'Name -like "*admin*"' | select Name`
+ - Get group members (**recursive** includes nested group membership)
+`Get-ADGroupMember -Identity "Domain Admins" -Recursive`
+ - Get group membership for a user
+`Get-ADPrincipalGroupMembership -Identity <username>`
+ 
+## Enumerating Shares
 ### Powerview (will need to bypass AMSI)
+ - Get all fileservers in the domain (lots of users log into these, lots of creds available if you can compromise a file server, as well as l00t!)
+`Get-NetFileServer`
  - Enumerate Domain Shares
 `Find-DomainShare`
+`Invoke-ShareFinder`
  - Enumerate Domain Shares the current user has access
 `Find-DomainShare -CheckShareAccess`
  - Enumerate "Interesting" Files on accessible shares
 `Find-InterestingDomainShareFile -Include *passwords*`
 `Invoke-ShareFinder -ExcludeStandard -ExcludePrint -ExcludeIPC –Verbose`
+`Invoke-FileFinder`
  - Check ACLs for a path
 `Get-PathAcl -Path "\\Path\Of\A\Share"`
 
-## OUs
+## Enumerating OUs
 ### Powerview (will need to bypass AMSI)
  - To list all the OUs we will use
 `Get-NetOU -FullData`
  - To find out what machines are in a particular OU
 `Get-NetOU <OUName> | %{Get-NetComputer -ADSPath $_}`
 
-## GPOs
+## Enumerating GPOs
 ### Powerview (will need to bypass AMSI)
  `Get-NetGPO -FullData`
  `Get-NetGPO -GPOname <The GUID of the GPO>`
@@ -133,7 +181,7 @@ Get-NetGPO -ADSpath '$adspath'
  - Enumerate GPOs where a specified user or group has interesting permissions
 `Get-NetGPO | %{Get-ObjectAcl -ResolveGUIDs -Name $_.Name}  | ?{$_.IdentityReference -match "<user>"}`
 
-## ACLs
+## Enumerating ACLs
 ### Powerview (will need to bypass AMSI)
  - Return the ACLs associated with the specified account
 `Get-ObjectAcl -SamAccountName <AccountName> -ResolveGUIDs`
@@ -153,7 +201,7 @@ Get-NetGPO -ADSpath '$adspath'
  - Check for modify rights/permissions for a specified user or group
 `Invoke-ACLScanner -ResolveGUIDs | ?{$_.IdentityReference -match "<user>"}`
 
-## Forests & Trusts
+## Enumerating Forests & Trusts
 ### Powerview (will need to bypass AMSI)
  - Enumerate all domains in the forest
 `Get-NetForestDomain`
@@ -177,7 +225,7 @@ Get-NetGPO -ADSpath '$adspath'
  - List all the domains in the forest
 `(Get-ADForest).Domains`
 
-## Applocker
+## Enumerating Applocker Policy
 ### AD Module 
  - Review Local AppLocker Effective Policy
 `Get-AppLockerPolicy -Effective | select -ExpandProperty RuleCollections`
