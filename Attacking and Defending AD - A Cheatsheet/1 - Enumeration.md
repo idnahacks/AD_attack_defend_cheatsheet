@@ -1,4 +1,3 @@
-[TOC]
 # Enumeration
 This is absolutely key, and you should always come back to this step any time you escalate to a new user or gain access to a new machine.
 
@@ -177,10 +176,15 @@ _Built-In Groups are good to check for membership e.g. Remote Desktop Users, Ser
 `Get-NetOU <OUName> | %{Get-NetComputer -ADSPath $_}`
 
 ## Enumerating GPOs
+It is not possible to enumerate the settings within a GPO from any command line tool. The closest thing is to export RSoP with Get-GPResultantsetOfPolicy.
+
 ### Powerview (will need to bypass AMSI)
  `Get-NetGPO -FullData`
  `Get-NetGPO -GPOname <The GUID of the GPO>`
- `get-netgpogroup -verbose`
+ `Get-NetGPO | select displayname`
+ `Get-NetGPO -ComputerName <computername>`
+  - Get GPOs which use Restricted Groups or groups.xml for interesting users (Restricted Groups add domain users to machine local groups via GPO)
+ `Get-NetGPOGroup -Verbose`
   - List GPOs assigned to an OU
 ```
 $adspath = (get-netou studentmachines -fulldata).gplink
@@ -192,6 +196,11 @@ Get-NetGPO -ADSpath '$adspath'
 `Get-DomainGPOLocalGroup | Select-Object GPODisplayName, GroupName`
  - Enumerate GPOs where a specified user or group has interesting permissions
 `Get-NetGPO | %{Get-ObjectAcl -ResolveGUIDs -Name $_.Name}  | ?{$_.IdentityReference -match "<user>"}`
+
+### Group Policy Module
+`Get-GPO -All`
+ - Get RSoP report
+	 - `Get-GPResultantsetOfPolicy -ReportType Html -Path <outfile>`
 
 ## Enumerating ACLs
 ### Powerview (will need to bypass AMSI)
