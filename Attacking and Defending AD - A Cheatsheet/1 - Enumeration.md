@@ -17,6 +17,7 @@ PowerView makes things a little more easy, but can be picked up by AMSI and ther
  - Get Domain Controllers
 
 `Get-NetDomainController`
+
 `Get-NetDomainController -Domain <DomainName>`
  - Get Domain Policies
 
