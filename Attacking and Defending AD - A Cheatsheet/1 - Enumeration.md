@@ -62,14 +62,17 @@ PowerView makes things a little more easy, but can be picked up by AMSI and ther
 
 ### AD Module
  - Show a user's properties
-`Get-ADUser -Filter * -Identity <user> -Properties *`
+`Get-ADUser -Identity <user> -Properties *`
  - Search for a string in a user's attribute
 `Get-ADUser -Filter 'Description -like "*pass*"' -Properties Description | select Name,Description`
+
 `Get-ADUser -Filter 'Description -ne $null' -Properties Description | select Name,Description`
  - Get a list of all properties for users
 `Get-ADUser -Filter * -Properties * | select -First 1 | Get-Member -MemberType *Property | select Name`
  - Show the last password set date for users
 `Get-ADUser -Filter * -Properties * | select name,@{expression={[datetime]::fromFileTime($_.pwdlastset)}}`
+ - Show users with password not required attribute set
+`Get-ADUser -Filter 'PasswordNotRequired -eq $True' -Properties PasswordNotRequired | select Name,PasswordNotRequired`
 
 ## Computer Enumeration
 ### Powerview (will need to bypass AMSI)
