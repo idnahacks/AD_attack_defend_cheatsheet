@@ -183,6 +183,16 @@ _Built-In Groups are good to check for membership e.g. Remote Desktop Users, Ser
 `Get-NetOU -FullData`
  - To find out what machines are in a particular OU
 `Get-NetOU <OUName> | %{Get-NetComputer -ADSPath $_}`
+   - List GPOs assigned to an OU
+```
+(get-netou <OUName> -fulldata).gplink
+# Copy the ADSPath
+Get-NetGPO -ADSPath '<adspath>'
+```
+
+#### AD Module
+`Get-ADOrganizationalUnit -Filter * -Properties `
+
 
 ### Enumerating GPOs
 It is not possible to enumerate the settings within a GPO from any command line tool. The closest thing is to export RSoP with Get-GPResultantsetOfPolicy.
@@ -192,21 +202,24 @@ It is not possible to enumerate the settings within a GPO from any command line 
  `Get-NetGPO -GPOname <The GUID of the GPO>`
  `Get-NetGPO | select displayname`
  `Get-NetGPO -ComputerName <computername>`
-  - Get GPOs which use Restricted Groups or groups.xml for interesting users (Restricted Groups add domain users to machine local groups via GPO)
+   - List GPOs assigned to an OU
+```
+(get-netou <OUName> -fulldata).gplink
+# Copy the ADSPath
+Get-NetGPO -ADSPath '<adspath>'
+```
+  - Get GPOs which use Restricted Groups or groups.xml for interesting users (Restricted Groups add domain users to machine local groups via GPO. These can identify attractive targets for compromise.)
  `Get-NetGPOGroup -Verbose`
-  - List GPOs assigned to an OU
-```
-$adspath = (get-netou studentmachines -fulldata).gplink
-Get-NetGPO -ADSpath '$adspath'
-```
  - FInd users that are part of a machines's local admins group
  `Find-GPOComputerAdmin -ComputerName <ComputerName>`
+  - Get machines where the given user is a member of a specific group
+`Find-GPOLocation -UserName <username> -Verbose
  - Returns all GPOs in a domain that modify local group memberships through Restricted Groups or Group Policy Preferences
 `Get-DomainGPOLocalGroup | Select-Object GPODisplayName, GroupName`
  - Enumerate GPOs where a specified user or group has interesting permissions
 `Get-NetGPO | %{Get-ObjectAcl -ResolveGUIDs -Name $_.Name}  | ?{$_.IdentityReference -match "<user>"}`
 
-#### Group Policy Module
+#### Group Policy Module (Only available where RSAT is installed.)
 `Get-GPO -All`
  - Get RSoP report
 	 - `Get-GPResultantsetOfPolicy -ReportType Html -Path <outfile>`
@@ -215,17 +228,20 @@ Get-NetGPO -ADSpath '$adspath'
 #### Powerview (will need to bypass AMSI)
  - Return the ACLs associated with the specified account
 `Get-ObjectAcl -SamAccountName <AccountName> -ResolveGUIDs`
+ - Return ACLs with a specified prefix for search
 `Get-ObjectAcl -ADSprefix 'CN=Administrator, CN=Users' -Verbose`
  - Return ACLs for the Domain Admins group
 `Get-ObjectAcl -SamAccountName "Domain Admins" -ResolveGUIDs`
  - Return ACLs for the Users group, just displaying the ActiveDirectoryRights field
 `Get-ObjectAcl -SamAccountName "users" -ResolveGUIDs | select -expandproperty IdentityReference ActiveDirectoryRights`
+ - Return ACLs the a specific user has rights to
+`Get-ObjectACL -ResolveGUIDs | ?{$_.IdentityReference -like "*compromisedusername*"}`
  - Enumerate ACLs for all GPOs
 `Get-NetGPO | %{Get-ObjectAcl -ResolveGUIDs -Name $_.Name}`
- - Search for interesting ACEs
+ - Search for interesting ACEs (looks for anything with write access)
 `Invoke-ACLScanner -ResolveGUIDs`
  - Check ACLs for a path
-`Get-PathAcl -Path "\\Path\Of\A\Share"`
+`Get-PathAcl -Path "\\server\path"`
  - Enumerate GPOs where a specified user or group has interesting permissions
 `Get-NetGPO | %{Get-ObjectAcl -ResolveGUIDs -Name $_.Name}  | ?{$_.IdentityReference -match "<user>"}`
  - Check for modify rights/permissions for a specified user or group
