@@ -1,3 +1,4 @@
+[TOC]
 # Enumeration
 This is absolutely key, and you should always come back to this step any time you escalate to a new user or gain access to a new machine.
 
