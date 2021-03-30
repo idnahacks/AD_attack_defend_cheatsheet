@@ -6,20 +6,27 @@ PowerView makes things a little more easy, but can be picked up by AMSI and ther
 ## Domain Enumeration
 ### PowerView (will need to bypass AMSI)
  - Get Current Domain
+
 `Get-NetDomain`
  - Get information about a different domain
+
 `Get-NetDomain -Domain <DomainName>`
  - Get Domain SID
+
 `Get-DomainSID`
  - Get Domain Controllers
+
 `Get-NetDomainController`
 `Get-NetDomainController -Domain <DomainName>`
  - Get Domain Policies
- `Get-DomainPolicy`
+
+`Get-DomainPolicy`
   - Get Password policy (useful for not locking accounts in a brute force or password spray scenario)
- `(Get-DomainPolicy)."system access"`
+
+`(Get-DomainPolicy)."system access"`
   - Get Kerberos policy (useful for things like Golden Ticket attacks)
- `(Get-DomainPolicy)."kerberos policy"`
+
+`(Get-DomainPolicy)."kerberos policy"`
  
  ### AD Module
  - Get Current Domain
