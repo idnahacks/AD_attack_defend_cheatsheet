@@ -63,6 +63,8 @@ PowerView makes things a little more easy, but can be picked up by AMSI and ther
  `Get-Userproperty`
  - Show the samaccountname field from all users from a specified domain
 `Get-netuser -domain <domainName> | select -expandproperty samaccountname`
+ - Show all admin users
+`Get-NetUser -AdminCount | Select name,whencreated,pwdlastset,lastlogon`
  - Show last password change
 `Get-UserProperty -Properties pwdlastset`
  - Show logon count of a user (handy for detecting decoy or stale accounts)
@@ -90,6 +92,8 @@ PowerView makes things a little more easy, but can be picked up by AMSI and ther
 `Get-ADUser -Filter * -Properties * | select name,@{expression={[datetime]::fromFileTime($_.pwdlastset)}}`
  - Show users with password not required attribute set
 `Get-ADUser -Filter 'PasswordNotRequired -eq $True' -Properties PasswordNotRequired | select Name,PasswordNotRequired`
+ - Get admin users
+`get-aduser -filter {AdminCount -eq 1} -prop * | select name,created,passwordlastset,lastlogondate
 
 ### Computer Enumeration
 #### Powerview (will need to bypass AMSI)
