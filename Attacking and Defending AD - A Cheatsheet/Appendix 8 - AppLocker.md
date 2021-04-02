@@ -1,6 +1,9 @@
 # Bypassing AppLocker
 If you get errors when running powershell commands relating to language modes, this will be due to AppLocker running in Constrained Language Mode.
 
+ - Check the AppLocker Language mode
+`$ExecutionContext.SessionState.LanguageMode`
+
 There may be elements within the AppLocker policy that show weak spots and these can be used to bypass it.
 
  - Enumerate the AppLocker policy

